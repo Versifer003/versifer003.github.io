@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Order-Block Pullback</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+  /* Layout: a cinema-style player (16:9 canvas) over a chapter rail; one dark trading-desk world. */
+  :root {
+    --ink: #030405;
+    --panel: #0b0f14;
+    --line: rgba(233, 237, 242, .1);
+    --fg: #e9edf2;
+    --muted: #8a93a0;
+    --bull: #22e07a;
+    --bear: #ff3d5e;
+    --amber: #f5b83d;
+    --display: "Sora", "Segoe UI", system-ui, sans-serif;
+    --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --mono: "JetBrains Mono", Consolas, monospace;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ink); color: var(--fg); font: 15px/1.5 var(--body); }
+  .wrap { max-width: 1120px; margin: 0 auto; padding-block: 24px 40px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 16px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+  h1 { margin: 0; font: 700 clamp(22px, 3.4vw, 32px)/1.15 var(--display); letter-spacing: -.02em; text-wrap: balance; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; }
+  .player { display: grid; gap: 10px; }
+  .screen { position: relative; width: 100%; max-width: 100%; aspect-ratio: 16 / 9; border-radius: 14px; overflow: hidden; border: 1px solid var(--line); background: #000; }
+  canvas { display: block; width: 100%; height: 100%; cursor: pointer; }
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); font: 600 13px var(--body); cursor: pointer; }
+  .btn:hover { border-color: rgba(233, 237, 242, .3); }
+  .btn.primary { background: var(--bull); border-color: var(--bull); color: #03140a; min-width: 132px; justify-content: center; }
+  .btn:focus-visible, input:focus-visible, .chapter:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+  .time { font: 500 12px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+  #scrub { flex: 1 1 220px; min-width: 0; accent-color: var(--bull); }
+  .chapters { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; }
+  .chapter { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); font: 500 13px var(--body); text-align: left; cursor: pointer; }
+  .chapter small { font: 500 11px var(--mono); color: var(--muted); }
+  .chapter.is-on { border-color: var(--bull); box-shadow: inset 0 0 0 1px var(--bull); }
+  .note { margin: 0; color: var(--muted); font-size: 12.5px; max-width: 75ch; }
+  #record-status { font: 500 12px var(--mono); color: var(--amber); }
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>The Order-Block Pullback</h1>
+    <p>An animated walkthrough of how the strong-stock setup on Versifer Trading Desk is traded. Educational, not investment advice.</p>
+  </header>
+
+  <section class="player" aria-label="Strategy video">
+    <div class="screen"><canvas id="screen" width="1280" height="720" role="img" aria-label="Animated explainer of the order-block pullback strategy"></canvas></div>
+    <div class="controls">
+      <button id="play" class="btn primary" type="button">Play with sound</button>
+      <button id="mute" class="btn" type="button" aria-pressed="false">Sound on</button>
+      <input id="scrub" type="range" min="0" max="1000" step="1" value="0" aria-label="Seek">
+      <span id="time" class="time">0:00 / 0:00</span>
+      <button id="record" class="btn" type="button" hidden>Save as video (.webm)</button>
+      <span id="record-status" role="status"></span>
+    </div>
+    <nav id="chapters" class="chapters" aria-label="Chapters"></nav>
+  </section>
+
+  <p class="note">Narration by Alice and George, voices generated with ElevenLabs (elevenlabs.io); the background music is generated in your browser. All prices are an illustrative example on one made-up chart, not a real stock or a recommendation. The order-block rule shown is the one the app uses (last opposite candle before a move of at least 1.5× the average candle range). Practice on paper first; for personal advice, consult a SEBI-registered investment adviser.</p>
+</div>
+
+<script>
+(() => {
+  const W = 1280, H = 720;
+  const C = { ink: "#030405", grid: "rgba(233,237,242,.06)", axis: "#5b6370", fg: "#e9edf2", muted: "#8a93a0", bull: "#22e07a", bear: "#ff3d5e", amber: "#f5b83d", white: "#ffffff" };
+  const F = { display: "Sora, 'Segoe UI', sans-serif", body: "'IBM Plex Sans', 'Segoe UI', sans-serif", mono: "'JetBrains Mono', Consolas, monospace" };
+
+  // One illustrative chart. Index 6 is the order block; 7-9 displace; 15 enters the zone; 16 is the rejection.
+  const BASE = [
+    [1258, 1260, 1254, 1255], [1255, 1257, 1251, 1252], [1252, 1255, 1249, 1253], [1253, 1254, 1248, 1249],
+    [1249, 1252, 1246, 1250], [1250, 1251, 1245, 1247], [1247, 1248, 1240, 1241],
+    [1241, 1252, 1240.5, 1251], [1251, 1260, 1250, 1259], [1259, 1266, 1258, 1265],
+    [1265, 1270, 1263, 1268], [1268, 1269.5, 1264, 1266],
+    [1266, 1267, 1259, 1260], [1260, 1261, 1254, 1255], [1255, 1256, 1249, 1250], [1250, 1251, 1244, 1246],
+    [1246, 1250, 1241, 1249],
+    [1249, 1256, 1248, 1255], [1255, 1262, 1254, 1261], [1261, 1270, 1260, 1268], [1268, 1272, 1265, 1271], [1271, 1278, 1270, 1276], [1276, 1281, 1274, 1279.5],
+  ];
+  const FAIL = [[1246, 1248, 1238, 1238.5], [1238.5, 1240, 1232, 1234]];
+  const OB = 6, ZONE = { lo: 1240, hi: 1248 }, ENTRY = 1249, STOP = 1239, T1 = 1269, T2 = 1279;
+  const CH = { l: 92, r: 1000, t: 96, b: 560 }, LO = 1228, HI = 1286;
+  const X = (i) => CH.l + 34 + i * 38;
+  const Y = (p) => CH.t + ((HI - p) / (HI - LO)) * (CH.b - CH.t);
+
+  const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+  const ease = (v) => { v = clamp(v); return v < .5 ? 4 * v * v * v : 1 - Math.pow(-2 * v + 2, 3) / 2; };
+  const seg = (p, a, b) => ease((p - a) / (b - a));
+  const lerp = (a, b, v) => a + (b - a) * v;
+  const inr = (n) => "₹" + Math.round(n).toLocaleString("en-IN");
+
+  const canvas = document.getElementById("screen");
+  const ctx = canvas.getContext("2d");
+  let scale = 1;
+  function fit(s) {
+    scale = s;
+    canvas.width = W * s; canvas.height = H * s;
+  }
+  fit(Math.min(2, Math.max(1, window.devicePixelRatio || 1)));
+
+  /* ---------- drawing primitives ---------- */
+  function text(str, x, y, { font = `500 20px ${F.body}`, color = C.fg, align = "left", base = "alphabetic", alpha = 1, glow = 0 } = {}) {
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.font = font; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = base;
+    if (glow) { ctx.shadowColor = color; ctx.shadowBlur = glow; }
+    ctx.fillText(str, x, y);
+    ctx.restore();
+  }
+  function wrapLines(str, font, width) {
+    ctx.save(); ctx.font = font;
+    const out = []; let line = "";
+    for (const word of str.split(" ")) {
+      const test = line ? line + " " + word : word;
+      if (ctx.measureText(test).width > width && line) { out.push(line); line = word; } else line = test;
+    }
+    if (line) out.push(line);
+    ctx.restore();
+    return out;
+  }
+  function pill(str, x, y, { bg = C.bull, color = "#03140a", font = `700 15px ${F.mono}`, alpha = 1, align = "left", glow = 14 } = {}) {
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.font = font;
+    const w = ctx.measureText(str).width + 22, h = 30;
+    const x0 = align === "right" ? x - w : align === "center" ? x - w / 2 : x;
+    ctx.shadowColor = bg; ctx.shadowBlur = glow;
+    ctx.fillStyle = bg; roundRect(x0, y - h / 2, w, h, 7); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = color; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+    ctx.fillText(str, x0 + 11, y + 1);
+    ctx.restore();
+    return w;
+  }
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+  function hline(price, color, label, { progress = 1, dash = [], alpha = 1, side = "right", width = 2 } = {}) {
+    if (progress <= 0) return;
+    const y = Y(price), x1 = lerp(CH.l, CH.r, progress);
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash);
+    ctx.shadowColor = color; ctx.shadowBlur = 8;
+    ctx.beginPath(); ctx.moveTo(CH.l, y); ctx.lineTo(x1, y); ctx.stroke();
+    ctx.restore();
+    if (label && progress > .95) pill(label, CH.r + 10, y, { bg: color, color: color === C.bear ? "#fff" : "#03140a", font: `700 13px ${F.mono}`, alpha: alpha * clamp((progress - .95) * 20), glow: 10 });
+  }
+  function candle(i, [o, h, l, c], grow = 1, alpha = 1, highlight = 0) {
+    if (grow <= 0) return;
+    const cc = o + (c - o) * grow;
+    const hh = Math.max(o, cc, lerp(o, h, grow)), ll = Math.min(o, cc, lerp(o, l, grow));
+    const up = c >= o, col = up ? C.bull : C.bear, x = X(i);
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    if (highlight) { ctx.shadowColor = col; ctx.shadowBlur = 26 * highlight; }
+    ctx.strokeStyle = col; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x, Y(hh)); ctx.lineTo(x, Y(ll)); ctx.stroke();
+    ctx.fillStyle = col;
+    const top = Y(Math.max(o, cc)), bot = Y(Math.min(o, cc));
+    ctx.fillRect(x - 11, top, 22, Math.max(2, bot - top));
+    ctx.restore();
+  }
+  function candles(list, count, { alpha = 1, glowAt = -1, glow = 0 } = {}) {
+    const n = Math.floor(count);
+    for (let i = 0; i < Math.min(n, list.length); i++) candle(i, list[i], 1, alpha, i === glowAt ? glow : 0);
+    if (n < list.length && count > n) candle(n, list[n], count - n, alpha, n === glowAt ? glow : 0);
+  }
+  function grid(alpha = 1) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    for (let p = 1230; p <= 1285; p += 10) {
+      ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(CH.l, Y(p)); ctx.lineTo(CH.r, Y(p)); ctx.stroke();
+      text(p.toLocaleString("en-IN"), CH.l - 12, Y(p) + 5, { font: `500 13px ${F.mono}`, color: C.axis, align: "right" });
+    }
+    text("5-MIN CANDLES · ILLUSTRATIVE EXAMPLE", CH.l, CH.t - 24, { font: `700 12px ${F.mono}`, color: C.axis });
+    ctx.restore();
+  }
+  function zone(alpha = 1, reach = 1, hot = 0) {
+    if (alpha <= 0) return;
+    const x0 = X(OB) - 16, x1 = lerp(X(OB) + 16, CH.r, reach);
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.fillStyle = `rgba(34,224,122,${.12 + hot * .16})`;
+    ctx.fillRect(x0, Y(ZONE.hi), x1 - x0, Y(ZONE.lo) - Y(ZONE.hi));
+    ctx.strokeStyle = C.bull; ctx.setLineDash([6, 5]); ctx.lineWidth = 1.5;
+    ctx.strokeRect(x0, Y(ZONE.hi), x1 - x0, Y(ZONE.lo) - Y(ZONE.hi));
+    ctx.restore();
+    if (reach > .9) text("ORDER BLOCK  1,240–1,248", x0 + 4, Y(ZONE.lo) + 22, { font: `700 13px ${F.mono}`, color: C.bull, alpha: alpha * clamp((reach - .9) * 10) });
+  }
+  function caption(kicker, title, body, p) {
+    const a = seg(p, 0, .08);
+    ctx.save();
+    const g = ctx.createLinearGradient(0, 570, 0, H);
+    g.addColorStop(0, "rgba(3,4,5,0)"); g.addColorStop(.25, "rgba(3,4,5,.92)"); g.addColorStop(1, "rgba(3,4,5,1)");
+    ctx.fillStyle = g; ctx.fillRect(0, 560, W, H - 560);
+    ctx.restore();
+    text(kicker, 60, 606, { font: `700 13px ${F.mono}`, color: C.amber, alpha: a });
+    text(title, 60, 640, { font: `700 27px ${F.display}`, alpha: a });
+    wrapLines(body, `400 18px ${F.body}`, 1160).forEach((ln, i) => text(ln, 60, 670 + i * 24, { font: `400 18px ${F.body}`, color: "#c4cad3", alpha: seg(p, .03, .12) }));
+  }
+  function arrow(x1, y1, x2, y2, color, width = 2.5) {
+    ctx.save();
+    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = width;
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    const a = Math.atan2(y2 - y1, x2 - x1);
+    ctx.beginPath(); ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - 12 * Math.cos(a - .45), y2 - 12 * Math.sin(a - .45));
+    ctx.lineTo(x2 - 12 * Math.cos(a + .45), y2 - 12 * Math.sin(a + .45));
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  function box(p1, p2, color, alpha, x0 = X(16) + 18, x1 = CH.r) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = color;
+    ctx.fillRect(x0, Y(Math.max(p1, p2)), x1 - x0, Math.abs(Y(p1) - Y(p2)));
+    ctx.restore();
+  }
+  function bg() {
+    ctx.fillStyle = C.ink; ctx.fillRect(0, 0, W, H);
+    const g = ctx.createRadialGradient(W * .3, H * .35, 40, W * .3, H * .35, 900);
+    g.addColorStop(0, "rgba(34,224,122,.06)"); g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+
+  /* ---------- scenes ---------- */
+  const SCENES = [
+    { title: "Intro", dur: 16, draw(p, s) {
+      grid(.35);
+      candles(BASE, BASE.length, { alpha: .14 });
+      const a = seg(p, .05, .3);
+      text("VERSIFER TRADING DESK", W / 2, 236, { font: `700 15px ${F.mono}`, color: C.bull, align: "center", alpha: a });
+      text("The Order-Block Pullback", W / 2, 318, { font: `800 66px ${F.display}`, align: "center", alpha: seg(p, .12, .4), glow: 18 });
+      text("A strong-stock setup, step by step", W / 2, 372, { font: `500 26px ${F.body}`, color: "#c4cad3", align: "center", alpha: seg(p, .25, .5) });
+      text("Educational walkthrough · not investment advice", W / 2, 470, { font: `500 15px ${F.mono}`, color: C.muted, align: "center", alpha: seg(p, .4, .65) });
+    } },
+    { title: "What an order block is", dur: 18, draw(p, s) {
+      grid();
+      const n = lerp(0, 12, seg(p, 0, .55));
+      const pulse = n > 7 ? .6 + .4 * Math.sin(s * 5) : 0;
+      zone(seg(p, .55, .62), seg(p, .58, .8));
+      candles(BASE, n, { glowAt: OB, glow: pulse });
+      if (n > 7) {
+        const a = seg(p, .32, .42);
+        arrow(X(OB) - 110, Y(1234), X(OB) - 20, Y(1239.5), C.bear);
+        text("Last red candle", X(OB) - 230, Y(1234) - 30, { font: `700 18px ${F.display}`, color: C.bear, alpha: a });
+        text("before the rally", X(OB) - 230, Y(1234) - 10, { font: `500 15px ${F.body}`, color: C.muted, alpha: a });
+      }
+      caption("STEP 1 OF 8 · FIND THE BLOCK", "The last red candle before a strong rally", "That candle is the order block. Buyers who drove the rally often left unfilled orders there, so price tends to react when it returns. The app shades it as a zone from its low to its high.", p);
+    } },
+    { title: "Displacement", dur: 18, draw(p, s) {
+      grid(); zone(1, 1);
+      candles(BASE, 12);
+      const x = X(12) + 20, a = seg(p, .08, .3);
+      ctx.save(); ctx.globalAlpha = a;
+      arrow(x, Y(ZONE.hi), x, lerp(Y(ZONE.hi), Y(1265), seg(p, .08, .35)), C.bull, 3);
+      ctx.restore();
+      text("+17 pts in 3 candles", x + 16, Y(1258), { font: `700 20px ${F.mono}`, color: C.bull, alpha: seg(p, .3, .4) });
+      const rx = CH.l + 40, b = seg(p, .4, .52);
+      ctx.save(); ctx.globalAlpha = b; ctx.fillStyle = C.amber; ctx.fillRect(rx, Y(1277), 10, Y(1271) - Y(1277)); ctx.restore();
+      text("Average candle range ≈ 6 pts", rx + 22, Y(1274) + 6, { font: `600 16px ${F.mono}`, color: C.amber, alpha: b });
+      pill("17 ÷ 6 ≈ 2.8× ATR   ✓ needs ≥ 1.5×", x + 16, Y(1250), { alpha: seg(p, .55, .66) });
+      caption("STEP 2 OF 8 · CHECK THE DISPLACEMENT", "The move away must be decisive", "The app only keeps a block when the next three candles travel at least 1.5× the average candle range (ATR) beyond it. A slow drift away does not count.", p);
+    } },
+    { title: "Wait for the retest", dur: 15, draw(p, s) {
+      grid();
+      const n = lerp(12, 16, seg(p, .3, .78));
+      const inZone = n > 15.5;
+      zone(1, 1, inZone ? .5 + .5 * Math.sin(s * 6) : 0);
+      candles(BASE, n);
+      const a = seg(p, .02, .12) * (1 - seg(p, .3, .38));
+      if (a > 0) {
+        text("Don't chase the top", X(11) - 60, Y(1281), { font: `700 22px ${F.display}`, color: C.bear, alpha: a });
+        ctx.save(); ctx.globalAlpha = a; ctx.strokeStyle = C.bear; ctx.lineWidth = 3;
+        const cx = X(11), cy = Y(1274);
+        ctx.beginPath(); ctx.moveTo(cx - 16, cy - 16); ctx.lineTo(cx + 16, cy + 16); ctx.moveTo(cx + 16, cy - 16); ctx.lineTo(cx - 16, cy + 16); ctx.stroke();
+        ctx.restore();
+        text("poor price, wide stop", X(11) - 60, Y(1281) + 24, { font: `500 15px ${F.body}`, color: C.muted, alpha: a });
+      }
+      if (inZone) pill("IN OB ZONE", X(15) + 30, Y(ZONE.hi) - 30, { alpha: seg(p, .78, .86) });
+      caption("STEP 3 OF 8 · BE PATIENT", "Wait for price to pull back into the zone", "Buying the top of the rally gives a poor entry and a wide stop. Let price come back to the block. On the app's cards the tag turns IN OB ZONE.", p);
+    } },
+    { title: "Confirmation candle", dur: 15, draw(p, s) {
+      grid(); zone(1, 1, .3);
+      candles(BASE, 16);
+      candle(16, BASE[16], seg(p, .08, .55), 1, seg(p, .5, .7) * (.7 + .3 * Math.sin(s * 5)));
+      const a = seg(p, .55, .66);
+      if (a > 0) {
+        ctx.save(); ctx.globalAlpha = a;
+        arrow(X(16) + 120, Y(1236), X(16) + 14, Y(1242), C.amber);
+        arrow(X(16) + 120, Y(1256), X(16) + 16, Y(1249.5), C.bull);
+        ctx.restore();
+        text("Long lower wick: sellers pushed in and failed", X(16) + 128, Y(1236) + 6, { font: `600 16px ${F.body}`, color: C.amber, alpha: a });
+        text("Closes back above the zone: the trigger", X(16) + 128, Y(1256) + 6, { font: `600 16px ${F.body}`, color: C.bull, alpha: seg(p, .65, .76) });
+      }
+      caption("STEP 4 OF 8 · CONFIRM", "Wait for a rejection candle", "A candle that dips into the zone and closes back above it shows buyers defending the level. That close is your entry signal. No rejection, no trade.", p);
+    } },
+    { title: "Entry, stop and targets", dur: 26, draw(p, s) {
+      grid(); zone(1, 1);
+      candles(BASE, 17);
+      box(ENTRY, STOP, "rgba(255,61,94,.16)", seg(p, .35, .45));
+      box(ENTRY, T2, "rgba(34,224,122,.08)", seg(p, .62, .72));
+      hline(ENTRY, C.white, "ENTRY 1,249", { progress: seg(p, .05, .2) });
+      hline(STOP, C.bear, "STOP 1,239", { progress: seg(p, .2, .35) });
+      hline(T1, C.bull, "T1 1,269 · 2R", { progress: seg(p, .45, .58), dash: [8, 6] });
+      hline(T2, C.bull, "T2 1,279 · 3R", { progress: seg(p, .55, .68), dash: [8, 6] });
+      text("1R = 10 pts", X(17) + 40, Y(1246.6) + 6, { font: `700 18px ${F.mono}`, color: C.bear, alpha: seg(p, .38, .48) });
+      text("Stop just below the zone", X(17) + 40, Y(1246.6) + 28, { font: `500 15px ${F.body}`, color: C.muted, alpha: seg(p, .38, .48) });
+      text("T1 = the swing high", X(17) + 40, Y(1266), { font: `500 15px ${F.body}`, color: C.muted, alpha: seg(p, .55, .64) });
+      pill("R:R to T1 = 2.0   ✓ minimum 1.5", X(17) + 40, Y(1259), { alpha: seg(p, .72, .82) });
+      caption("STEP 5 OF 8 · PLAN THE EXIT FIRST", "Know your stop and targets before you enter", "The stop goes just beyond the far side of the zone; that distance is 1R. Targets are nearby swing levels, or 1R and 2R projections. Skip the trade if T1 pays less than 1.5R.", p);
+    } },
+    { title: "Managing the trade", dur: 15, draw(p, s) {
+      grid(); zone(1, 1);
+      const n = lerp(17, 23, seg(p, .05, .85));
+      const hitT1 = n >= 20, hitT2 = n >= 23;
+      const stopNow = lerp(STOP, ENTRY, seg(p, .42, .55) * (hitT1 ? 1 : 0));
+      hline(T2, C.bull, "T2 1,279", { dash: [8, 6] });
+      hline(T1, C.bull, "T1 1,269", { dash: [8, 6] });
+      hline(ENTRY, C.white, "ENTRY 1,249", { alpha: .7 });
+      hline(stopNow, C.bear, stopNow > STOP + .5 ? "STOP → 1,249" : "STOP 1,239");
+      candles(BASE, n);
+      if (hitT1) pill("Book 50% at T1  +2R", X(12) + 10, Y(T1) - 30, { alpha: seg(p, .4, .48) });
+      if (hitT1) text("Stop moved to entry: the rest can't lose", X(17) + 30, Y(ENTRY) + 34, { font: `600 16px ${F.body}`, color: C.amber, alpha: seg(p, .52, .6) });
+      if (hitT2) pill("Exit the rest at T2  +3R", X(12) + 10, Y(T2) - 30, { alpha: seg(p, .86, .92) });
+      if (hitT2) pill("Blended result ≈ +2.5R", X(12) + 10, Y(T2) - 70, { bg: C.amber, alpha: seg(p, .9, .97) });
+      caption("STEP 6 OF 8 · MANAGE", "Take half, then protect the rest", "When T1 hits, book half and move the stop up to your entry. The remaining half runs toward T2 with no risk left on the trade.", p);
+    } },
+    { title: "When the setup fails", dur: 20, draw(p, s) {
+      grid(); zone(1, 1, 0);
+      candles(BASE, 16);
+      hline(STOP, C.bear, "STOP 1,239");
+      candle(16, FAIL[0], seg(p, .1, .45));
+      candle(17, FAIL[1], seg(p, .5, .7), .8);
+      const a = seg(p, .45, .55);
+      if (a > 0) {
+        ctx.save(); ctx.globalAlpha = a * (.6 + .4 * Math.sin(s * 6)); ctx.strokeStyle = C.bear; ctx.lineWidth = 3;
+        ctx.strokeRect(X(16) - 20, Y(1249), 40, Y(1237) - Y(1249)); ctx.restore();
+        text("Closed through the zone: the block is used up", X(16) + 40, Y(1252), { font: `600 17px ${F.body}`, color: C.bear, alpha: a });
+      }
+      pill("No rejection → no entry", X(16) + 40, Y(1262), { bg: "#2a3038", color: C.fg, glow: 0, alpha: seg(p, .58, .66) });
+      pill("If you were in: stop out at −1R", X(17) + 26, Y(1233), { bg: C.bear, color: "#fff", alpha: seg(p, .7, .78) });
+      caption("STEP 7 OF 8 · ACCEPT SMALL LOSSES", "When it fails, it fails small", "A close through the far side of the zone means the idea is wrong. The stop takes you out at a planned −1R. Never move a stop further away to avoid the loss.", p);
+    } },
+    { title: "Position sizing", dur: 25, draw(p, s) {
+      const rows = [
+        ["Capital", inr(200000), C.fg],
+        ["Risk per trade (0.5%)", inr(1000 * seg(p, .12, .24)), C.amber],
+        ["Entry − stop  (1,249 − 1,239)", "₹10 per share", C.fg],
+        ["Quantity  =  ₹1,000 ÷ ₹10", Math.round(100 * seg(p, .4, .52)) + " shares", C.bull],
+        ["Position value", inr(124900 * seg(p, .52, .62)), C.fg],
+        ["If the stop hits", "−" + inr(1000), C.bear],
+        ["If T1 hits on the full size", "+" + inr(2000), C.bull],
+      ];
+      text("POSITION SIZE CALCULATOR", 160, 110, { font: `700 14px ${F.mono}`, color: C.amber, alpha: seg(p, 0, .08) });
+      rows.forEach(([k, v, col], i) => {
+        const a = seg(p, .04 + i * .085, .12 + i * .085), y = 158 + i * 58;
+        ctx.save(); ctx.globalAlpha = a;
+        ctx.fillStyle = i === 3 ? "rgba(34,224,122,.1)" : "rgba(233,237,242,.04)";
+        roundRect(150, y - 32, 980, 48, 10); ctx.fill();
+        ctx.restore();
+        text(k, 176, y, { font: `500 21px ${F.body}`, color: "#c4cad3", alpha: a });
+        text(v, 1104, y, { font: `700 24px ${F.mono}`, color: col, align: "right", alpha: a });
+      });
+      caption("STEP 8 OF 8 · SIZE BY RISK", "The stop decides the size, not your conviction", "Pick a fixed small risk per trade, often 0.5–1% of capital. Quantity = money at risk ÷ (entry − stop). A wider stop means fewer shares, so every loss stays the same size.", p);
+    } },
+    { title: "The checklist", dur: 21, draw(p, s) {
+      const items = [
+        "Stock is in the bullish rows, above VWAP, sector green",
+        "Fresh order block with a ≥ 1.5× ATR displacement",
+        "Price pulled back INTO the zone, no chasing",
+        "Rejection candle closed back above the zone",
+        "R:R to T1 is at least 1.5",
+        "Not in the first 15 or last 30 minutes",
+        "Risk 0.5–1% of capital, quantity from the stop",
+        "Daily loss limit set; the stop never moves further away",
+      ];
+      text("BEFORE EVERY TRADE", 150, 96, { font: `700 14px ${F.mono}`, color: C.amber, alpha: seg(p, 0, .06) });
+      items.forEach((item, i) => {
+        const a = seg(p, .04 + i * .09, .1 + i * .09), tick = seg(p, .08 + i * .09, .13 + i * .09), y = 140 + i * 54;
+        ctx.save(); ctx.globalAlpha = a;
+        ctx.strokeStyle = tick > .5 ? C.bull : "rgba(233,237,242,.3)"; ctx.lineWidth = 2;
+        roundRect(150, y - 20, 30, 30, 7); ctx.stroke();
+        if (tick > 0) {
+          ctx.strokeStyle = C.bull; ctx.lineWidth = 3.5; ctx.shadowColor = C.bull; ctx.shadowBlur = 10;
+          ctx.beginPath(); ctx.moveTo(157, y - 5); ctx.lineTo(157 + 6 * Math.min(1, tick * 2), y - 5 + 7 * Math.min(1, tick * 2));
+          if (tick > .5) ctx.lineTo(163 + 12 * (tick - .5) * 2, y + 2 - 15 * (tick - .5) * 2);
+          ctx.stroke();
+        }
+        ctx.restore();
+        text(item, 200, y + 2, { font: `500 23px ${F.body}`, alpha: a });
+      });
+      caption("THE CHECKLIST", "Every box, every time", "If any box stays empty, skip the trade. There will be another setup tomorrow.", p);
+    } },
+    { title: "Before you trade", dur: 18, draw(p, s) {
+      grid(.25);
+      candles(BASE, BASE.length, { alpha: .1 });
+      text("Practice it on paper first", W / 2, 260, { font: `800 50px ${F.display}`, align: "center", alpha: seg(p, .05, .25), glow: 14 });
+      text("Log 30–50 setups in R before risking real money.", W / 2, 314, { font: `500 24px ${F.body}`, color: "#c4cad3", align: "center", alpha: seg(p, .2, .4) });
+      const a = seg(p, .4, .6);
+      text("Educational only, not investment advice. Prices in the app are indicative Yahoo data.", W / 2, 420, { font: `500 17px ${F.body}`, color: C.muted, align: "center", alpha: a });
+      text("For advice suited to you, consult a SEBI-registered investment adviser.", W / 2, 448, { font: `500 17px ${F.body}`, color: C.muted, align: "center", alpha: a });
+      text("VERSIFER TRADING DESK", W / 2, 540, { font: `700 15px ${F.mono}`, color: C.bull, align: "center", alpha: seg(p, .55, .75) });
+      text("Voices: ElevenLabs (elevenlabs.io) · Music generated in the browser", W / 2, 568, { font: `500 13px ${F.mono}`, color: C.axis, align: "center", alpha: seg(p, .55, .75) });
+    } },
+  ];
+  const STARTS = []; let TOTAL = 0;
+  for (const sc of SCENES) { STARTS.push(TOTAL); TOTAL += sc.dur; }
+
+
+  /* ---------- sound: per-scene narration + generated background music ---------- */
+  const VOICE_AT = .6;
+  const audio = { ctx: null, master: null, music: null, voice: [], musicGain: null, voiceGain: null, musicSrc: null, voiceSrc: null, voiceScene: -1, base: null, ready: null, dest: null, muted: false };
+  // Fetch the narration up front; decoding waits for the first click (browsers only allow sound after one).
+  // It ships as base64 inside JSON because download managers such as IDM intercept .wav requests and hand the page an empty reply.
+  const voiceBytes = fetch("strategy-audio/narration.json").then((r) => (r.ok ? r.json() : { clips: [] }))
+    .then((d) => d.clips.map((b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer)).catch(() => []);
+
+  function initAudio() {
+    if (audio.ready) return audio.ready;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return (audio.ready = Promise.resolve());
+    const ac = audio.ctx = new AC();
+    audio.master = ac.createGain(); audio.master.connect(ac.destination);
+    audio.musicGain = ac.createGain(); audio.musicGain.gain.value = .16; audio.musicGain.connect(audio.master);
+    audio.voiceGain = ac.createGain(); audio.voiceGain.connect(audio.master);
+    audio.ready = Promise.all([
+      voiceBytes.then((list) => Promise.all(list.map((b) => new Promise((ok) => ac.decodeAudioData(b, ok, () => ok(null)))))).then((v) => { audio.voice = v; }),
+      renderMusic(ac.sampleRate).then((b) => { audio.music = b; }).catch(() => null),
+    ]);
+    return audio.ready;
+  }
+
+  // A calm A-minor loop (Am F C G, 84 bpm, 8 bars): soft pad, root bass, plucked arpeggio with echo, light kick and shaker.
+  function renderMusic(rate) {
+    const beat = 60 / 84, bar = beat * 4, bars = 8, len = bar * bars;
+    const oc = new OfflineAudioContext(2, Math.ceil(rate * len), rate);
+    const out = oc.createGain(); out.gain.value = .9; out.connect(oc.destination);
+    const hz = (m) => 440 * Math.pow(2, (m - 69) / 12);
+    const pad = oc.createBiquadFilter(); pad.type = "lowpass"; pad.frequency.value = 1100; pad.connect(out);
+    const arp = oc.createGain(), echo = oc.createDelay(1), fb = oc.createGain(), wet = oc.createGain();
+    echo.delayTime.value = beat * .75; fb.gain.value = .3; wet.gain.value = .35;
+    arp.connect(out); arp.connect(echo); echo.connect(fb); fb.connect(echo); echo.connect(wet); wet.connect(out);
+    const tone = (type, f, t0, dur, peak, dest, attack = .01, detune = 0) => {
+      const o = oc.createOscillator(), g = oc.createGain();
+      o.type = type; o.frequency.value = f; o.detune.value = detune;
+      g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(peak, t0 + attack); g.gain.exponentialRampToValueAtTime(.0001, t0 + dur);
+      o.connect(g); g.connect(dest); o.start(t0); o.stop(t0 + dur + .05);
+    };
+    const CHORDS = [[45, [57, 60, 64], [69, 72, 76, 72]], [41, [53, 57, 60], [65, 69, 72, 69]], [48, [55, 60, 64], [67, 72, 76, 72]], [43, [55, 59, 62], [67, 71, 74, 71]]];
+    for (let b = 0; b < bars; b++) {
+      const [root, notes, run] = CHORDS[b % 4], t = b * bar;
+      notes.forEach((m) => { tone("triangle", hz(m), t, bar + .6, .05, pad, .9, -6); tone("sawtooth", hz(m), t, bar + .6, .012, pad, .9, 7); });
+      [0, 2].forEach((k) => tone("sine", hz(root), t + k * beat, beat * 1.6, .2, out));
+      for (let e = 0; e < 8; e++) tone("triangle", hz(run[e % 4]), t + (e * beat) / 2, .35, .045, arp, .005);
+      [0, 2].forEach((k) => {
+        const o = oc.createOscillator(), g = oc.createGain(), t0 = t + k * beat;
+        o.frequency.setValueAtTime(110, t0); o.frequency.exponentialRampToValueAtTime(42, t0 + .22);
+        g.gain.setValueAtTime(.3, t0); g.gain.exponentialRampToValueAtTime(.0001, t0 + .28);
+        o.connect(g); g.connect(out); o.start(t0); o.stop(t0 + .3);
+      });
+    }
+    const noise = oc.createBuffer(1, Math.ceil(rate * .08), rate), d = noise.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+    const hp = oc.createBiquadFilter(), sg = oc.createGain();
+    hp.type = "highpass"; hp.frequency.value = 7000; sg.gain.value = .045; hp.connect(sg); sg.connect(out);
+    for (let k = 0; k < bars * 4; k++) { const n = oc.createBufferSource(); n.buffer = noise; n.connect(hp); n.start(k * beat + beat / 2); }
+    return oc.startRendering();
+  }
+
+  // Phones only allow sound that starts inside the tap itself, so wake the audio now (a silent blip),
+  // before the narration has finished loading. On iPhone, also ask to play when the silent switch is on.
+  function unlockAudio() {
+    if (!audio.ctx) return;
+    try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch { /* older Safari */ }
+    audio.ctx.resume();
+    const blip = audio.ctx.createBufferSource();
+    blip.buffer = audio.ctx.createBuffer(1, 1, 22050);
+    blip.connect(audio.ctx.destination);
+    blip.start(0);
+  }
+
+  function stopAudio() {
+    for (const k of ["musicSrc", "voiceSrc"]) { if (audio[k]) { try { audio[k].stop(); } catch { /* already stopped */ } audio[k] = null; } }
+    audio.base = null; audio.voiceScene = -1;
+  }
+  // (Re)start music and the current scene's narration from time t; the picture then follows the audio clock.
+  function startAudio() {
+    if (!audio.ctx) return;
+    stopAudio();
+    audio.ctx.resume();
+    const now = audio.ctx.currentTime;
+    audio.base = now - t;
+    if (audio.music) {
+      const m = audio.ctx.createBufferSource();
+      m.buffer = audio.music; m.loop = true; m.connect(audio.musicGain); m.start(now, t % audio.music.duration);
+      audio.musicSrc = m;
+    }
+    scheduleVoice();
+  }
+  function scheduleVoice() {
+    const i = sceneAt(t), buf = audio.voice[i];
+    audio.voiceScene = i;
+    if (audio.voiceSrc) { try { audio.voiceSrc.stop(); } catch { /* already stopped */ } audio.voiceSrc = null; }
+    const now = audio.ctx.currentTime, g = audio.musicGain.gain;
+    g.cancelScheduledValues(now); g.setTargetAtTime(.16, now, .3);
+    if (!buf) return;
+    const into = t - STARTS[i] - VOICE_AT;
+    if (into >= buf.duration) return;
+    const v = audio.ctx.createBufferSource();
+    v.buffer = buf; v.connect(audio.voiceGain);
+    const at = now + Math.max(0, -into);
+    v.start(at, Math.max(0, into));
+    audio.voiceSrc = v;
+    // Duck the music under the voice, then bring it back.
+    g.setTargetAtTime(.06, at, .15); g.setTargetAtTime(.16, at + buf.duration - Math.max(0, into), .5);
+  }
+
+  /* ---------- player ---------- */
+  const playBtn = document.getElementById("play"), scrub = document.getElementById("scrub"), timeEl = document.getElementById("time");
+  const nav = document.getElementById("chapters");
+  const mmss = (v) => `${Math.floor(v / 60)}:${String(Math.floor(v % 60)).padStart(2, "0")}`;
+  nav.innerHTML = SCENES.map((sc, i) => `<button type="button" class="chapter" data-i="${i}"><small>${String(i + 1).padStart(2, "0")}</small><span>${sc.title}</span><small>${mmss(STARTS[i])}</small></button>`).join("");
+  const chapterBtns = [...nav.children];
+
+  let t = 0, playing = false, last = 0, recorder = null, started = false, waiting = false;
+  function sceneAt(v) { let i = SCENES.length - 1; while (i > 0 && STARTS[i] > v) i--; return i; }
+  function render() {
+    const i = sceneAt(t), sc = SCENES[i], local = t - STARTS[i];
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    bg();
+    sc.draw(clamp(local / sc.dur), local);
+    // Fade between scenes.
+    const edge = Math.min(local, sc.dur - local);
+    if (edge < .35 && !(i === 0 && local < .35)) { ctx.fillStyle = `rgba(3,4,5,${1 - edge / .35})`; ctx.fillRect(0, 0, W, H); }
+    if (!started) {
+      ctx.fillStyle = "rgba(3,4,5,.55)"; ctx.fillRect(0, 0, W, H);
+      ctx.save(); ctx.fillStyle = C.bull; ctx.shadowColor = C.bull; ctx.shadowBlur = 30;
+      ctx.beginPath(); ctx.arc(W / 2, H / 2 - 20, 54, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+      ctx.fillStyle = "#03140a"; ctx.beginPath(); ctx.moveTo(W / 2 - 16, H / 2 - 48); ctx.lineTo(W / 2 + 28, H / 2 - 20); ctx.lineTo(W / 2 - 16, H / 2 + 8); ctx.closePath(); ctx.fill();
+      text("Play with sound", W / 2, H / 2 + 76, { font: `700 26px ${F.display}`, align: "center" });
+      text("Narrated walkthrough · about 3½ minutes", W / 2, H / 2 + 106, { font: `500 16px ${F.mono}`, color: C.muted, align: "center" });
+    }
+    // Progress hairline.
+    ctx.fillStyle = "rgba(233,237,242,.08)"; ctx.fillRect(0, H - 4, W, 4);
+    ctx.fillStyle = C.bull; ctx.fillRect(0, H - 4, W * (t / TOTAL), 4);
+    timeEl.textContent = `${mmss(t)} / ${mmss(TOTAL)}`;
+    scrub.value = Math.round((t / TOTAL) * 1000);
+    chapterBtns.forEach((b, j) => b.classList.toggle("is-on", j === i));
+  }
+  function frame(now) {
+    if (playing && !waiting) {
+      if (audio.base !== null && audio.ctx.state === "running") t = audio.ctx.currentTime - audio.base;
+      else t += Math.min(.1, (now - last) / 1000);
+      if (audio.base !== null && sceneAt(t) !== audio.voiceScene && t < TOTAL) scheduleVoice();
+      if (t >= TOTAL) { t = TOTAL; setPlaying(false); if (recorder) recorder.stop(); }
+    }
+    last = now;
+    render();
+    requestAnimationFrame(frame);
+  }
+  function setPlaying(on) {
+    if (on && t >= TOTAL) t = 0;
+    playing = on;
+    playBtn.textContent = on ? "Pause" : t >= TOTAL ? "Replay" : "Play";
+    // Hold the picture until the sound has loaded, so the first words aren't clipped.
+    if (on) { started = true; waiting = true; const ready = initAudio(); unlockAudio(); ready.then(() => { waiting = false; if (playing) startAudio(); }); } else stopAudio();
+  }
+  const reseek = () => { if (playing && audio.ctx) startAudio(); };
+  const muteBtn = document.getElementById("mute");
+  muteBtn.addEventListener("click", () => {
+    audio.muted = !audio.muted;
+    if (audio.master) audio.master.gain.value = audio.muted ? 0 : 1;
+    muteBtn.textContent = audio.muted ? "Sound off" : "Sound on";
+    muteBtn.setAttribute("aria-pressed", String(audio.muted));
+  });
+  playBtn.addEventListener("click", () => setPlaying(!playing));
+  canvas.addEventListener("click", () => setPlaying(!playing));
+  scrub.addEventListener("input", () => { t = (scrub.value / 1000) * TOTAL; if (t < TOTAL && playBtn.textContent === "Replay") playBtn.textContent = "Play"; });
+  scrub.addEventListener("change", reseek);
+  nav.addEventListener("click", (e) => { const b = e.target.closest(".chapter"); if (!b) return; t = STARTS[+b.dataset.i] + .01; setPlaying(true); });
+  document.addEventListener("keydown", (e) => {
+    if (e.target.closest("input, button") && e.key !== " ") return;
+    if (e.key === " ") { e.preventDefault(); setPlaying(!playing); }
+    if (e.key === "ArrowRight") { t = Math.min(TOTAL, t + 5); reseek(); }
+    if (e.key === "ArrowLeft") { t = Math.max(0, t - 5); reseek(); }
+  });
+
+  // Saving a .webm works when this page is opened directly (the local server), not inside a sandboxed frame.
+  const recBtn = document.getElementById("record"), recStatus = document.getElementById("record-status");
+  if (window.top === window.self && window.MediaRecorder && canvas.captureStream) {
+    recBtn.hidden = false;
+    recBtn.addEventListener("click", async () => {
+      if (recorder) return;
+      recBtn.disabled = true;
+      await initAudio();
+      const type = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"].find((m) => MediaRecorder.isTypeSupported(m));
+      const chunks = [];
+      const tracks = canvas.captureStream(30).getVideoTracks();
+      if (audio.ctx) {
+        if (!audio.dest) { audio.dest = audio.ctx.createMediaStreamDestination(); audio.master.connect(audio.dest); }
+        tracks.push(...audio.dest.stream.getAudioTracks());
+      }
+      fit(1);
+      recorder = new MediaRecorder(new MediaStream(tracks), { mimeType: type, videoBitsPerSecond: 6_000_000 });
+      recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      recorder.onstop = () => {
+        const url = URL.createObjectURL(new Blob(chunks, { type: "video/webm" }));
+        const a = Object.assign(document.createElement("a"), { href: url, download: "order-block-pullback.webm" });
+        document.body.append(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        recorder = null; recBtn.disabled = false;
+        fit(Math.min(2, Math.max(1, window.devicePixelRatio || 1)));
+        recStatus.textContent = "Saved order-block-pullback.webm";
+      };
+      t = 0; recorder.start(); setPlaying(true);
+      recStatus.textContent = "Recording in real time. Keep this tab visible until it finishes.";
+    });
+  }
+
+  const fonts = [`800 66px Sora`, `700 27px Sora`, `500 20px "IBM Plex Sans"`, `700 15px "JetBrains Mono"`].map((f) => document.fonts.load(f).catch(() => null));
+  // ?t=SECONDS opens paused at that moment (local links only; the artifact frame drops query strings).
+  const seek = Number(new URLSearchParams(location.search).get("t"));
+  Promise.race([Promise.all(fonts), new Promise((r) => setTimeout(r, 2500))]).then(() => {
+    if (seek > 0) t = Math.min(TOTAL, seek);
+    if (seek > 0) started = true;
+    render();
+    requestAnimationFrame((now) => { last = now; requestAnimationFrame(frame); });
+  });
+})();
+</script>
+</body>
+</html>
