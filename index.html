@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en" data-static="1">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#000000">
+    <title>Versifer Trading Desk</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#home" aria-label="Versifer Trading Desk home"><img class="brand-mark" src="favicon.svg" alt="" width="30" height="30">Versifer<span class="brand-sub">Trading Desk</span></a>
+      <nav class="tabs" aria-label="Main">
+        <a href="#home" data-view-link="home" data-key="1" aria-keyshortcuts="1">Home</a>
+        <a href="#orderblock" data-view-link="orderblock" data-key="2" aria-keyshortcuts="2">Order Block</a>
+        <a href="#fresh" data-view-link="fresh" data-key="3" aria-keyshortcuts="3">Fresh OB</a>
+        <a href="#predict" data-view-link="predict" data-key="4" aria-keyshortcuts="4">Predictor</a>
+        <a href="#courses" data-view-link="courses" data-key="5" aria-keyshortcuts="5">Courses</a>
+      </nav>
+      <form id="cmd" class="cmd" role="search" autocomplete="off"><label for="cmd-input" aria-hidden="true">&gt;</label><input id="cmd-input" list="cmd-options" placeholder="Symbol or tab, e.g. HDFCBANK  ( / )" aria-label="Go to a stock, index, sector or tab" aria-keyshortcuts="/" spellcheck="false"></form>
+      <div class="clock" aria-label="India time and market session"><span id="clock-time">--</span> <span id="clock-session" class="muted"></span></div>
+      <div class="feed-pill" title="Market feed status"><span id="feed-dot" class="dot"></span><span id="feed-label">Connecting…</span></div>
+      <div class="tape" aria-label="Ticker tape"><div id="tape-track" class="tape-track"></div></div>
+    </header>
+
+    <div id="feed-error" class="banner" role="alert" hidden></div>
+
+    <main>
+      <!-- HOME -->
+      <section id="view-home" class="view home-grid" data-view="home">
+        <div class="home-main">
+          <section id="overview" class="panel overview" aria-label="Market overview"></section>
+          <section class="panel market-panel" aria-label="Market depth and top movers">
+            <div class="depth">
+              <span id="session-pill" class="session-pill"><i></i><span>Checking session</span></span>
+              <div class="depth-title"><span>MARKET DEPTH</span> <span class="muted">as of <b id="depth-time">--:--</b></span></div>
+              <svg id="depth-chart" viewBox="0 0 940 150" role="img" aria-label="Distribution of today's percent changes"></svg>
+            </div>
+            <div class="movers">
+              <div class="movers-col">
+                <div class="movers-head"><span class="icon-box up" aria-hidden="true">↗</span>TOP BULLISH</div>
+                <div id="top-bullish" class="mover-list"></div>
+              </div>
+              <div class="movers-col bear">
+                <div class="movers-head"><span class="spacer"></span>TOP BEARISH<span class="icon-box down" aria-hidden="true">↘</span></div>
+                <div id="top-bearish" class="mover-list"></div>
+              </div>
+            </div>
+          </section>
+
+          <div class="home-lower">
+            <section aria-labelledby="sectors-title">
+              <div class="section-head"><h2 id="sectors-title">Sectors now</h2><a href="#orderblock" class="link">Open Order Block →</a></div>
+              <div class="panel sectors-panel">
+                <div class="sector-breadth">
+                  <span class="breadth-count up"><b id="sectors-up">0</b><small>SECTORS UP</small></span>
+                  <span id="sector-strip" class="sector-strip" aria-hidden="true"></span>
+                  <span class="breadth-count down"><small>DOWN</small><b id="sectors-down">0</b></span>
+                </div>
+                <div class="flow-head"><span>SECTOR FLOW</span><span class="muted">Avg <b id="sector-avg">--</b></span><span id="sector-flow-time" class="muted push">--</span></div>
+                <svg id="sector-flow" viewBox="0 0 440 170" role="img" aria-label="Intraday percent change of sector indices"></svg>
+                <div class="sector-group-title">SECTOR HEATMAP <span class="muted">· click a tile to filter the board</span></div>
+                <div id="sector-heat" class="sector-heat"></div>
+              </div>
+            </section>
+
+          </div>
+        </div>
+
+        <aside class="rail" aria-label="Shortcuts">
+          <div class="panel actions">
+            <a href="#courses"><span class="icon-box blue">▶</span><span><b>Watch the strategy course</b><small>Narrated, about 3½ minutes</small></span></a>
+            <button id="open-feedback" type="button"><span class="icon-box teal">▭</span><span><b>Send feedback</b><small>Ideas, bugs, data issues</small></span></button>
+          </div>
+        </aside>
+      </section>
+
+      <!-- ORDER BLOCK -->
+      <section id="view-orderblock" class="view" data-view="orderblock" hidden>
+        <div class="ob-toolbar">
+          <div class="chips" role="group" aria-label="Bias filter">
+            <button type="button" class="chip is-active" data-bias="all" aria-pressed="true">All</button>
+            <button type="button" class="chip" data-bias="bullish" aria-pressed="false">Bullish</button>
+            <button type="button" class="chip" data-bias="bearish" aria-pressed="false">Bearish</button>
+            <button type="button" class="chip" id="ob-rr" aria-pressed="false" title="Only setups with reward to T1 at least twice the risk">2R+</button>
+          </div>
+          <label class="field-inline">Sector <select id="ob-sector"><option value="">All sectors</option></select></label>
+          <label class="field-inline search"><span class="sr-only">Search</span><input id="ob-search" type="search" placeholder="Search symbol…" autocomplete="off"></label>
+          <label class="field-inline">Sort <select id="ob-sort"><option value="change">% change</option><option value="rr">Reward : risk</option><option value="volume">Volume surge</option></select></label>
+          <span id="ob-count" class="muted push"></span>
+        </div>
+        <div class="panel live-panel">
+          <div class="flow-head live-head">
+            <span>LIVE PRICE FLOW</span>
+            <span id="live-dot" class="live-dot" aria-hidden="true"></span><span id="live-state" class="muted">--</span>
+            <label class="field-inline"><span class="sr-only">Instrument</span><select id="live-symbol"><option value="NIFTY">NIFTY 50</option></select></label>
+            <b id="live-price" class="live-price">--</b><span id="live-change" class="pct-pill">--</span>
+            <span id="live-time" class="muted push">--</span>
+            <input id="replay-range" class="replay-range" type="range" min="0" max="1000" value="0" aria-label="Replay time" hidden>
+            <button id="replay-btn" class="chip" type="button" aria-pressed="false" title="Replay today's session from 09:15 in 20 seconds; drag the slider to scrub">▶ Replay</button>
+            <button id="open-bell" class="chip bell" type="button" aria-pressed="true" title="Sweep and chime once when the market opens at 09:15 IST">Bell on</button>
+          </div>
+          <div id="flowboard" class="flowboard">
+            <svg id="fb-links" class="fb-links" aria-hidden="true"></svg>
+            <div id="fb-flow" class="fb-flow"><svg id="live-flow" role="img" aria-label="Every tracked stock's intraday path from the open, flowing into bullish and bearish stock cards"></svg><div id="flow-tip" class="flow-tip" role="status" hidden></div></div>
+            <button type="button" id="fb-filter-bull" class="fb-filter up" data-bias-box="bullish" aria-pressed="false" title="Show only bullish stocks (click again for all)"><b>▲ BULLISH</b><span class="fb-filter-count"></span></button>
+            <button type="button" id="fb-filter-bear" class="fb-filter down" data-bias-box="bearish" aria-pressed="false" title="Show only bearish stocks (click again for all)"><b>▼ BEARISH</b><span class="fb-filter-count"></span></button>
+            <div id="fb-cards-bull" class="fb-cards up"></div>
+            <div id="fb-detail-bull" class="fb-detail"></div>
+            <div id="fb-cards-bear" class="fb-cards down"></div>
+            <div id="fb-detail-bear" class="fb-detail"></div>
+          </div>
+          <p class="live-note muted">Every tracked stock's % move from its previous close fans out of one point at the open into the gate: bulls collect at the top, bears at the bottom. Energy flows into the 3 strongest on each side and on into the cards, strongest on the right. The white line is the selected instrument from 1-minute bars, refreshed every 5 s. Tags show order-block status (no open-interest data on this feed). Indicative Yahoo data, not an exchange tape.</p>
+        </div>
+        <p class="footnote">Order blocks: last opposite candle before a ≥1.5×ATR move on today's 5-minute bars, still unmitigated. Stops sit beyond the zone; targets are swing levels or R-multiples when no swing exists. Educational only, not advice.</p>
+      </section>
+
+      <section id="view-fresh" class="view fresh" data-view="fresh" hidden>
+        <div class="courses-head">
+          <h1>Fresh order blocks today</h1>
+          <p class="muted">Every fresh order block formed since the 09:15 IST open (a move of at least 1.5×ATR, still unmitigated), newest first. Weak zones are left out. Educational only, not advice.</p>
+        </div>
+        <div class="chips" role="group" aria-label="Fresh OB bias filter">
+          <button type="button" class="chip is-active" data-fresh-bias="all" aria-pressed="true">All <span id="fresh-all-count"></span></button>
+          <button type="button" class="chip" data-fresh-bias="bullish" aria-pressed="false">▲ Bullish <span id="fresh-bull-count"></span></button>
+          <button type="button" class="chip" data-fresh-bias="bearish" aria-pressed="false">▼ Bearish <span id="fresh-bear-count"></span></button>
+        </div>
+        <p id="fresh-summary" class="muted" aria-live="polite"></p>
+        <div id="fresh-list" class="fresh-list"></div>
+      </section>
+
+      <section id="view-predict" class="view predict" data-view="predict" hidden>
+        <div class="courses-head">
+          <h1>Market predictor</h1>
+          <p class="muted">Odds for the next daily candle from a machine-learning ensemble (logistic regression, random forest and gradient boosting) trained on 2 years of daily candles from every tracked instrument. It reads recent returns, the last 3 candles, the close within the day's range, stretch from the 20-day average, range, gap, volume and RSI. Each arrow's thickness and percentage is the probability of that move, measured from the last close in ATRs (average daily range). Stocks are ranked by their most likely move (up or down; ★ marks it). Daily moves are mostly noise, so expect odds well below certainty. Educational only, not advice.</p>
+        </div>
+        <p id="predict-summary" class="muted" aria-live="polite"></p>
+        <div id="predict-market"></div>
+        <div id="predict-list" class="predict-list"></div>
+      </section>
+
+      <section id="view-courses" class="view courses" data-view="courses" hidden>
+        <div class="courses-head">
+          <h1>Courses</h1>
+          <p class="muted">Narrated lessons on trading the setups this app finds. Educational, not investment advice.</p>
+        </div>
+        <article class="panel course">
+          <div class="course-meta">
+            <span class="tag mini up">COURSE 1</span>
+            <span class="muted">11 chapters · 3 min 27 s · voices by ElevenLabs</span>
+            <a class="link push" href="strategy-video.html" target="_blank" rel="noopener">Open full page ↗</a>
+          </div>
+          <iframe id="course-frame" class="course-frame" title="The Order-Block Pullback, narrated strategy video" data-src="strategy-video.html" allow="autoplay; fullscreen"></iframe>
+        </article>
+        <section class="panel course-live" aria-labelledby="course-live-title">
+          <div class="section-head"><h2 id="course-live-title">See it live</h2><span class="muted">Today's real examples of the steps in the video</span></div>
+          <div id="course-live" class="course-live-grid"></div>
+        </section>
+      </section>
+    </main>
+
+    <datalist id="symbol-options"></datalist>
+    <datalist id="cmd-options"></datalist>
+
+    <dialog id="stock-dialog" class="dialog wide" aria-labelledby="stock-title">
+      <form method="dialog" class="dialog-close"><button aria-label="Close">×</button></form>
+      <div class="stock-head">
+        <div><h2 id="stock-title">—</h2><small id="stock-name" class="muted"></small></div>
+        <div class="stock-price"><b id="stock-price">--</b> <span id="stock-change"></span></div>
+        <div class="chips" role="group" aria-label="Timeframe">
+          <button type="button" class="chip is-active" data-interval="5m">5m</button>
+          <button type="button" class="chip" data-interval="15m">15m</button>
+          <button type="button" class="chip" data-interval="1h">1h</button>
+          <button type="button" class="chip" data-interval="1D">1D</button>
+        </div>
+      </div>
+      <div id="stock-chart" class="stock-chart"></div>
+      <p id="stock-status" class="muted small"></p>
+      <div id="stock-levels" class="levels"></div>
+    </dialog>
+
+    <dialog id="feedback-dialog" class="dialog" aria-labelledby="feedback-title">
+      <form method="dialog" class="dialog-close"><button aria-label="Close">×</button></form>
+      <h2 id="feedback-title">Send feedback</h2>
+      <p class="muted small">Saved in this browser. Use “Copy all” to paste it wherever you report issues.</p>
+      <form id="feedback-form" class="form">
+        <label>Type<select name="kind"><option>Idea</option><option>Bug</option><option>Data issue</option></select></label>
+        <label>Message<textarea name="message" rows="4" maxlength="2000" required></textarea></label>
+        <div class="form-row end"><button id="feedback-copy" class="btn" type="button">Copy all</button><button class="btn primary" type="submit">Save</button></div>
+        <p id="feedback-message" class="form-message" role="status"></p>
+      </form>
+      <ul id="feedback-list" class="feedback-list"></ul>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" hidden></div>
+  </body>
+</html>
